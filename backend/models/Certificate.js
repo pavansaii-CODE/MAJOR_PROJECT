@@ -10,18 +10,19 @@ class Certificate {
     fileSize,
     mimeType,
     ipfsCid = null,
-    ipfsUrl = null
+    ipfsUrl = null,
+    isEncrypted = false
   }) {
     const id = crypto.randomUUID();
 
     const sql = `
       INSERT INTO certificates (
-        id, user_id, original_filename, file_hash, file_size, mime_type, ipfs_cid, ipfs_url
+        id, user_id, original_filename, file_hash, file_size, mime_type, ipfs_cid, ipfs_url, is_encrypted
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
-    await run(sql, [id, userId, originalFilename, fileHash, fileSize, mimeType, ipfsCid, ipfsUrl]);
+    await run(sql, [id, userId, originalFilename, fileHash, fileSize, mimeType, ipfsCid, ipfsUrl, isEncrypted ? 1 : 0]);
     return this.findById(id);
   }
 

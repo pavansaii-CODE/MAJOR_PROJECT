@@ -55,6 +55,7 @@ function initializeDatabase() {
           mime_type TEXT NOT NULL,
           ipfs_cid TEXT,
           ipfs_url TEXT,
+          is_encrypted INTEGER DEFAULT 0,
           blockchain_tx_hash TEXT,
           blockchain_verified INTEGER DEFAULT 0,
           verified_at DATETIME,
@@ -68,6 +69,15 @@ function initializeDatabase() {
           return;
         }
         console.log('✅ Certificates table ready');
+
+        // Add is_encrypted column if it doesn't exist (migration)
+        db.run(`
+          ALTER TABLE certificates ADD COLUMN is_encrypted INTEGER DEFAULT 0
+        `, (err) => {
+          if (err && !err.message.includes('duplicate column')) {
+            console.error('Note: is_encrypted column may already exist');
+          }
+        });
       });
 
       // Create indexes

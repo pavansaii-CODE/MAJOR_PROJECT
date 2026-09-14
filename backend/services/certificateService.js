@@ -2,6 +2,7 @@ const Certificate = require('../models/Certificate');
 const { generateHashFromBuffer } = require('./hashService');
 const { uploadBufferToIPFS } = require('./ipfsService');
 const { registerCertificate: registerOnBlockchain, verifyCertificate: verifyOnBlockchain } = require('./blockchainService');
+const { encryptFile, isEncryptionEnabled } = require('./encryptionService');
 
 /**
  * Process and register a certificate
@@ -36,8 +37,8 @@ async function processAndRegisterCertificate({
     console.log('🔄 Processing Certificate Registration');
     console.log('='.repeat(60));
 
-    // Step 1: Generate SHA-256 hash
-    console.log('1️⃣  Generating SHA-256 hash...');
+    // Step 1: Generate SHA-256 hash (BEFORE encryption)
+    console.log('1️⃣  Generating SHA-256 hash from original file...');
     const fileHash = generateHashFromBuffer(fileBuffer);
     console.log('   Hash:', fileHash);
 
@@ -47,16 +48,31 @@ async function processAndRegisterCertificate({
       throw new Error('This certificate has already been registered');
     }
 
-    // Step 2: Upload to IPFS
+    // Step 1.5: Encrypt file (NEW - for privacy)
+    let bufferToUpload = fileBuffer;
+    let isEncrypted = false;
+
+    if (isEncryptionEnabled()) {
+      console.log('🔒 Encrypting file for secure storage...');
+      bufferToUpload = encryptFile(fileBuffer);
+      isEncrypted = true;
+      console.log('   ✅ File encrypted with AES-256-GCM');
+    } else {
+      console.log('⚠️  Encryption disabled - uploading unencrypted file');
+    }
+
+    // Step 2: Upload to IPFS (encrypted file)
     console.log('2️⃣  Uploading to IPFS...');
-    const ipfsResult = await uploadBufferToIPFS(fileBuffer, originalFilename, {
+    const ipfsResult = await uploadBufferToIPFS(bufferToUpload, originalFilename, {
       userId,
       studentId,
       mimeType,
-      fileHash
+      fileHash,
+      encrypted: isEncrypted
     });
     console.log('   IPFS CID:', ipfsResult.cid);
     console.log('   IPFS URL:', ipfsResult.url);
+    console.log('   Encrypted:', isEncrypted ? 'Yes ✅' : 'No ⚠️');
 
     // Step 3: Save to database (without blockchain info yet)
     console.log('3️⃣  Saving to database...');
@@ -67,9 +83,11 @@ async function processAndRegisterCertificate({
       fileSize,
       mimeType,
       ipfsCid: ipfsResult.cid,
-      ipfsUrl: ipfsResult.url
+      ipfsUrl: ipfsResult.url,
+      isEncrypted: isEncrypted
     });
     console.log('   Database ID:', certificate.id);
+    console.log('   Is Encrypted:', isEncrypted ? 'Yes 🔒' : 'No');
 
     // Step 4: Register on blockchain
     console.log('4️⃣  Registering on blockchain...');
@@ -102,6 +120,7 @@ async function processAndRegisterCertificate({
           fileSize: updatedCertificate.file_size,
           ipfsCid: updatedCertificate.ipfs_cid,
           ipfsUrl: updatedCertificate.ipfs_url,
+          isEncrypted: Boolean(updatedCertificate.is_encrypted),
           blockchainVerified: Boolean(updatedCertificate.blockchain_verified),
           transactionHash: updatedCertificate.blockchain_tx_hash,
           verifiedAt: updatedCertificate.verified_at,
@@ -125,6 +144,7 @@ async function processAndRegisterCertificate({
           fileSize: certificate.file_size,
           ipfsCid: certificate.ipfs_cid,
           ipfsUrl: certificate.ipfs_url,
+          isEncrypted: Boolean(certificate.is_encrypted),
           blockchainVerified: false
         },
         error: 'Certificate uploaded but blockchain registration failed',

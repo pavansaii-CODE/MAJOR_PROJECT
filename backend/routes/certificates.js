@@ -1,4 +1,5 @@
 const express = require('express');
+const axios = require('axios');
 const { authenticate } = require('../middleware/auth');
 const { upload, handleMulterError } = require('../middleware/upload');
 const {
@@ -9,6 +10,7 @@ const {
   getCertificateById
 } = require('../services/certificateService');
 const { getNetworkInfo, testConnection } = require('../services/blockchainService');
+const { decryptFile } = require('../services/encryptionService');
 
 const router = express.Router();
 
@@ -131,6 +133,7 @@ router.get('/', authenticate, async (req, res) => {
         mimeType: cert.mime_type,
         ipfsCid: cert.ipfs_cid,
         ipfsUrl: cert.ipfs_url,
+        isEncrypted: Boolean(cert.is_encrypted),
         blockchainVerified: Boolean(cert.blockchain_verified),
         transactionHash: cert.blockchain_tx_hash,
         verifiedAt: cert.verified_at,
@@ -169,6 +172,7 @@ router.get('/:id', authenticate, async (req, res) => {
       mimeType: certificate.mime_type,
       ipfsCid: certificate.ipfs_cid,
       ipfsUrl: certificate.ipfs_url,
+      isEncrypted: Boolean(certificate.is_encrypted),
       blockchainVerified: Boolean(certificate.blockchain_verified),
       transactionHash: certificate.blockchain_tx_hash,
       verifiedAt: certificate.verified_at,
@@ -177,6 +181,79 @@ router.get('/:id', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Error fetching certificate:', error);
     res.status(500).json({ error: 'Failed to fetch certificate' });
+  }
+});
+
+/**
+ * GET /api/certificates/:id/download
+ * Download and decrypt certificate file
+ * Protected route - user can only download their own certificates
+ */
+router.get('/:id/download', authenticate, async (req, res) => {
+  try {
+    const certificate = await getCertificateById(req.params.id);
+
+    if (!certificate) {
+      return res.status(404).json({ error: 'Certificate not found' });
+    }
+
+    // Check ownership
+    if (certificate.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    if (!certificate.ipfs_url) {
+      return res.status(404).json({ error: 'Certificate file not available on IPFS' });
+    }
+
+    console.log('📥 Downloading certificate from IPFS...');
+    console.log('   CID:', certificate.ipfs_cid);
+    console.log('   Encrypted:', Boolean(certificate.is_encrypted));
+
+    // Download from IPFS
+    const ipfsResponse = await axios.get(certificate.ipfs_url, {
+      responseType: 'arraybuffer',
+      timeout: 30000 // 30 seconds
+    });
+
+    let fileBuffer = Buffer.from(ipfsResponse.data);
+
+    // Decrypt if encrypted
+    if (certificate.is_encrypted) {
+      console.log('🔓 Decrypting file...');
+      try {
+        fileBuffer = decryptFile(fileBuffer);
+        console.log('   ✅ File decrypted successfully');
+      } catch (decryptError) {
+        console.error('   ❌ Decryption failed:', decryptError.message);
+        return res.status(500).json({
+          error: 'Failed to decrypt file',
+          details: decryptError.message
+        });
+      }
+    }
+
+    // Set appropriate headers
+    res.set({
+      'Content-Type': certificate.mime_type,
+      'Content-Length': fileBuffer.length,
+      'Content-Disposition': `attachment; filename="${certificate.original_filename}"`,
+      'X-Certificate-Hash': certificate.file_hash,
+      'X-Encrypted': certificate.is_encrypted ? 'true' : 'false'
+    });
+
+    res.send(fileBuffer);
+  } catch (error) {
+    console.error('Download error:', error);
+
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      return res.status(504).json({ error: 'IPFS download timeout. Please try again.' });
+    }
+
+    res.status(500).json({
+      error: 'Failed to download certificate',
+      details: error.message
+    });
   }
 });
 

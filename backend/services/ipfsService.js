@@ -109,13 +109,22 @@ async function uploadBufferToIPFS(buffer, filename, metadata = {}) {
       contentType: metadata.mimeType || 'application/octet-stream'
     });
 
-    // Add metadata
+    // Add metadata (Pinata only accepts strings/numbers, not booleans)
+    const sanitizedMetadata = {};
+    for (const [key, value] of Object.entries(metadata)) {
+      if (typeof value === 'boolean') {
+        sanitizedMetadata[key] = value ? 'true' : 'false';
+      } else if (value !== null && value !== undefined) {
+        sanitizedMetadata[key] = String(value);
+      }
+    }
+
     const pinataMetadata = JSON.stringify({
       name: filename,
       keyvalues: {
         type: 'certificate',
         uploadedAt: new Date().toISOString(),
-        ...metadata
+        ...sanitizedMetadata
       }
     });
     formData.append('pinataMetadata', pinataMetadata);
